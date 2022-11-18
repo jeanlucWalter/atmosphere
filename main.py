@@ -1,7 +1,7 @@
-from numpy import sqrt, arctan, random
+from numpy import arctan, random
 import numpy
-from math import pi
-from matplotlib.pyplot import plot, show, title, xlabel, ylabel
+from math import pi, cos, sin, sqrt
+from matplotlib.pyplot import plot, show, title, xlabel, ylabel, subplot
 
 class Atmosphere():
   screen50mm = sqrt(24**2 + 36**2)
@@ -22,14 +22,12 @@ class Atmosphere():
     self.error = 1 / error if error != 0 else 0
     self.gM1 = 0
     self.alphaM1 = 0
-    if not self.diapo: self.createDiapo()
-    if not self.screen: self.createScreen()
-    self.computeParameters()
-    if not self.screenTarget: self.createScreenTarget()
-    if not self.diapoCorrected: self.createDiapoCorrected()
-    if not self.screenFinal: self.createScreen(True)
-    self.computeGAlpha()
-    self.computeBeta()
+    if not self.diapo: self.diapo = self.createDiapo()
+    if not self.screen: self.screen = self.createScreen(self.diapo)
+    # self.computeParameters()
+    # if not self.screenTarget: self.screenTarget = self.createScreenTarget()
+    # if not self.diapoCorrected: self.diapoCorrected = self.createDiapoCorrected()
+    # if not self.screenFinal: self.screenFinal = self.createScreen(self.diapoCorrected, True)
 
   def __str__(self):
     return f"Atm g: {self.g}, alpha: {round(arctan(self.alpha) * 180 / pi)}°, beta: {round(arctan(self.beta) * 180 / pi)}°"
@@ -55,9 +53,19 @@ class Atmosphere():
         elif error > 0.1: arrayPixels[1] += 1
         else: arrayPixels[0] += 1
     lower, nbPixels = 0.1, len(self.diapo)**2
-    for value in arrayPixels:
-      print(f"nombres de pixel de précision supérieure à {lower} : {int(value * 100 / nbPixels)}%")
+    data = [int(value * 100 / nbPixels) for value in arrayPixels]
+    names = []
+    while lower < 1.11:
+      names.append(f"Supérieures à {round(lower, 1)}")
       lower += 0.1
+    ax = subplot(111)
+    width=0.3
+    bins = map(lambda x: x-width/2,range(1,len(data)+1))
+    ax.bar(bins,data,width=width)
+    ax.set_xticks(map(lambda x: x, range(1,len(data)+1)))
+    ax.set_xticklabels(names,rotation=45, rotation_mode="anchor", ha="right")
+    show()
+    
 
 
   def computePrecision(self, value, approx):
@@ -66,21 +74,13 @@ class Atmosphere():
       return int(abs(approx / (value - approx)))
     return "infinity"
 
-  def drawScreen (self, type:str):
+  def drawScreen (self, plots, titleGraph="Pas de titre"):
       xs, ys = [], []
-      if type == "diapo": plots = self.diapo
-      elif type == "screen": plots = self.screen
-      elif type == "target": plots = self.screenTarget
-      elif type == "corrected": plots = self.diapoCorrected
-      elif type == "final": plots = self.screenFinal
-      else:
-        print(f"type {type} does not exist")
-        return
       for index in range(self.nbPoints):
         xs += [p[0] for p in plots[index]]
         ys += [p[1] for p in plots[index]]
       plot(xs, ys, 'o', color='black')
-      title(type)
+      title(titleGraph)
       xlabel("X Axis")
       ylabel("Y Axis")
       show()
@@ -98,22 +98,20 @@ class Atmosphere():
       startY = - self.sizeY / (2 * self.focal)
       stepY = -startY / ((self.nbPoints - 1) / 2)
       valueY = startY
+      diapo = []
     for indexY in range(self.nbPoints):
       newColumn, valueX = [], startX
-      Atmosphere.diapo.append(newColumn)
+      diapo.append(newColumn)
       for indexX in range(self.nbPoints):
         newColumn.append((valueX, valueY))
         valueX += stepX
       valueY += stepY
+    return diapo
 
-  def createScreen (self, corrected=False, error=True):
+  def createScreen (self, diapo, error=True):
     cst = self.g/self.gamma
     numY = sqrt(self.beta**2 + self.gamma2)
-    if corrected:
-      self.screenFinal = []
-    else:
-      self.screen = []
-    diapo = self.diapoCorrected if corrected else self.diapo
+    screenFinal = []
     for line in diapo:
       screenLine = []
       for xy in line:
@@ -124,10 +122,8 @@ class Atmosphere():
         screenX =  cst * numX / den + errorX
         screenY = cst * numY * xy[1] / den + errorY
         screenLine.append((screenX, screenY))
-      if corrected:
-        self.screenFinal.append(screenLine)
-      else:
-        self.screen.append(screenLine)
+      screenFinal.append(screenLine)
+    return screenFinal
 
 
   def createScreenTarget(self):
@@ -136,13 +132,15 @@ class Atmosphere():
     startY = - self.gGd * self.sizeY / (2 * self.focal)
     stepY = -startY / ((self.nbPoints - 1) / 2)
     valueY = startY
+    screenTarget = []
     for indexY in range(self.nbPoints):
       newColumn, valueX = [], startX
-      Atmosphere.screenTarget.append(newColumn)
+      screenTarget.append(newColumn)
       for indexX in range(self.nbPoints):
         newColumn.append((valueX, valueY))
         valueX += stepX
       valueY += stepY
+    return screenTarget
 
   def createDiapoCorrected(self):
     gamma2 = 1 + self.alphaGd**2
@@ -154,7 +152,7 @@ class Atmosphere():
     dx = -self.alphaGd * tNorm
     dy = - self.betaGd
     nyy = gamma2
-    self.diapoCorrected = []
+    diapoCorrected = []
     for line in self.screenTarget:
       screenLine = []
       for xy in line:
@@ -162,45 +160,11 @@ class Atmosphere():
         den = dc + dx * xy[0] + dy * xy[1]
         numY = nyy * xy[1]
         screenLine.append((numX / den, numY / den))
-      self.diapoCorrected.append(screenLine)
-
-  def computeGAlpha(self):
-    A, B, C, D, E = 0, 0, 0, 0, 0
-    for i in range(len(self.diapo)):
-      for j in range(len(self.diapo)):
-        A += self.diapo[i][j][0]**2 * self.screen[i][j][0]**2
-        B += self.diapo[i][j][0]**2 * self.screen[i][j][0]
-        C += self.diapo[i][j][0]**2
-        D += self.diapo[i][j][0] * self.screen[i][j][0]**2
-        E += self.diapo[i][j][0] * self.screen[i][j][0]
-    self.alphaM1 = (C*D-B*E) / (B**2 - A*C)
-    self.gM1 = (1 + self.alphaM1**2)**(-1/2) * (B*D-A*E) / (B**2 - A*C)
-
-  def computeBeta(self):
-    A, B, C, D, E, F, G, H = 0, 0, 0, 0, 0, 0, 0, 0
-    for i in range(len(self.diapo)):
-      for j in range(len(self.diapo)):
-        A += self.diapo[i][j][1]**2 * self.screen[i][j][1]**2
-        B += self.diapo[i][j][1]**2
-        C += self.diapo[i][j][1] * self.screen[i][j][1]**2
-        D += self.diapo[i][j][0]*self.diapo[i][j][1] * self.screen[i][j][1]**2
-        E += self.screen[i][j][1]**2
-        F += self.diapo[i][j][0] * self.screen[i][j][1]**2
-        G += self.diapo[i][j][0]**2 * self.screen[i][j][1]**2
-
-    a = A - self.gM1**2 / (1 + self.alphaM1**2) * B
-    b = 2*( C + self.alphaM1 * D)
-    c = E + 2*self.alphaM1*F + self.alphaM1**2 * G - self.gM1**2 * B
-    delta = sqrt(b**2 - 4*a*c)
-    self.betaM1 = (-b - delta)/ (2*a)
-    if self.betaM1 < 0: beta = (-b + delta)/ (2*a)
+      diapoCorrected.append(screenLine)
+    return diapoCorrected
 
   def computeParameters(self):
-    paramComputed = self.gradientDescent(self.costFunction, [0,0,0], 1)
-    Atmosphere.gGd = paramComputed[0]
-    Atmosphere.alphaGd = paramComputed[1]
-    Atmosphere.betaGd = paramComputed[2]
-    return paramComputed
+    Atmosphere.gGd, Atmosphere.alphaGd, Atmosphere.betaGd = self.gradientDescent(self.costFunction, [0,0,0], 1)
 
   def gradientDescent(self, costFunction, array, lambdaVal, cost="unknown", gradient="unknown"):
     if cost == "unknown": cost = costFunction(array)
@@ -224,7 +188,7 @@ class Atmosphere():
     return gradient
 
   def costFunction (self, array):
-    g,alpha,beta= array[0], array[1], array[2]
+    g,alpha,beta= array
     gamma2 = 1 + alpha**2
     gamma = sqrt(gamma2)
     cost = 0
@@ -245,7 +209,76 @@ class Atmosphere():
 
 class AtmosphereRT(Atmosphere):
   
-  def __init__(self, g:float, alpha:float, beta:float, focal:float, error:float, nbPixels:int):
-    super().__init(g, alpha, beta, focal, error, nbPixels)
+  def __init__(self, g:float, alpha:float, beta:float, focal:float, error:float, nbPixels:int, rotationAxis:list=[0.0,0.0,1.0], rotationAngle:float=0.0):
+    self.rotationAxis = rotationAxis
+    self.rotationAngle = rotationAngle * pi / 180
+    super().__init__(g, alpha, beta, focal, error, nbPixels)
+    self.diapoRotate = self.createDiapoRotate(self.diapo, self.rotationAngle, self.rotationAxis)
+    self.screenRotate = self.createScreen(self.diapoRotate)
+    self.computeParameters()
+    if not self.screenTarget: self.screenTarget = self.createScreenTarget()
+    if not self.diapoCorrected: self.diapoCorrected = self.createDiapoCorrected()
+    forScreenFinal = self.createDiapoRotate(self.diapoCorrected, self.rotationAngle, self.rotationAxis) if self.rotationAxis else self.diapoCorrected
+    if not self.screenFinal: self.screenFinal = self.createScreen(forScreenFinal, False)
+
+
+  def createDiapoRotate(self, diapo, angle, axis):
+    diapoRotate = []
+    for column in diapo:
+      newColumn = []
+      for (x,y) in column:
+        newColumn.append(self.__rotation(x, y, angle, axis))
+      diapoRotate.append(newColumn)
+    return diapoRotate
+
+  def createDiapoCorrected(self):
+    alphaBetaCorrection = super().createDiapoCorrected()
+    if not self.rotationAngle: return alphaBetaCorrection
+    return self.createDiapoRotate(alphaBetaCorrection, -self.rotationAngleGd, self.rotationAxisGd)
+
+
+  def __rotation(self, x, y, angle, axis):
+    cosV = cos(angle)
+    sinV = sin(angle)
+    ux, uy, uz = axis
+    xNew = (ux**2 * (1 - cosV) + cosV) * x + (ux*uy * (1 - cosV) - uz * sinV) * y + (ux*uz * (1 - cosV) + uy * sinV)
+    yNew = (ux*uy * (1 - cosV)  + uz * sinV) * x + (uy**2 * (1 - cosV) + cosV) * y + (uy*uz * (1 - cosV) - ux * sinV)
+    zNew = (ux*uz * (1 - cosV)  - uy * sinV) * x + (uy*uz * (1 - cosV) + ux * sinV) * y + (uz**2 * (1 - cosV) + cosV)
+    return xNew / zNew, yNew / zNew
+
+  def computeParameters(self):
+    if not self.rotationAngle:
+      Atmosphere.gGd, Atmosphere.alphaGd, Atmosphere.betaGd = self.gradientDescent(self.costFunction, [0,0,0], 1)
+    else:
+      params = self.gradientDescent(self.costFunction, [0,0,0,0,0,0], 1)
+      AtmosphereRT.gGd, AtmosphereRT.alphaGd, AtmosphereRT.betaGd = params[0], params[1], params[2]
+      AtmosphereRT.rotationAxisGd = [params[3], params[4], sqrt(1 - params[3]**2 - params[4]**2)]
+      AtmosphereRT.rotationAngleGd = params[5]
+      print("params", params, params[5] * 180 / pi)
+
+  def costFunction (self, array):
+    if not self.rotationAngle:
+      return super().costFunction(array)
+    g,alpha,beta, rotationAxisX, rotationAxisY, rotationAngle = array
+    gamma2 = 1 + alpha**2
+    gamma = sqrt(gamma2)
+    cost = 0
+    axis = [rotationAxisX, rotationAxisY, sqrt(1 - rotationAxisX**2 - rotationAxisY**2)]
+    diapo = self.createDiapoRotate(self.diapo, rotationAngle, axis)
+    for i in range(len(diapo)):
+      line = diapo[i]
+      for j in range(len(line)):
+        phiX = self.phiX(line[j], self.screenRotate[i][j], g, alpha, beta, gamma2, gamma)
+        phiY = self.phiY(line[j], self.screenRotate[i][j], g, alpha, beta, gamma2, gamma)
+        cost += phiX**2 + phiY**2
+    return cost
+
+  def prettyPrint(self):
+    super().prettyPrint()
+    realAngle = self.rotationAngle * 180 / pi
+    computedAngle = self.rotationAngleGd * 180 / pi
+    print(f"precision angle : {self.computePrecision(realAngle, computedAngle)} precision axis X : {self.computePrecision(self.rotationAxis[0], self.rotationAxisGd[0])} precision axis Y : {self.computePrecision(self.rotationAxis[1], self.rotationAxisGd[1])}")
+
+
 
         
